@@ -26,7 +26,11 @@ struct TrainingView: View {
                 case .untrained:
                     Button("Train") {
                         Task {
-                            try! await trainer.train()
+                            do {
+                                try await trainer.train()
+                            } catch {
+                                trainer.messages.append("Training failed: \(error.localizedDescription)")
+                            }
                         }
                     }
                 case .trained(let model), .predict(let model):
@@ -71,6 +75,13 @@ class ModelState {
     var messages = [String]()
 
     func train() async throws {
+        #if targetEnvironment(simulator)
+            messages.append(
+                "MLX cannot evaluate on the iOS Simulator. Run this app on a real iPhone/iPad or use Mac (Designed for iPad)."
+            )
+            return
+        #endif
+
         let model = LeNetContainer()
         try await model.train(output: self)
         self.state = .trained(model)
@@ -79,16 +90,33 @@ class ModelState {
 
 actor LeNetContainer {
 
-    private let model = LeNet()
+    private var model: LeNet?
 
     let mnistImageSize: CGSize = CGSize(width: 28, height: 28)
 
     func train(output: ModelState) async throws {
+        #if targetEnvironment(simulator)
+            let device = Device(.cpu)
+        #else
+            let device = Device(.gpu)
+        #endif
+
+        try await Device.withDefaultDevice(device) {
+            try await trainWithDefaultDevice(output: output)
+        }
+    }
+
+    private func trainWithDefaultDevice(output: ModelState) async throws {
+        let model = LeNet()
+        self.model = model
+
         // Note: this is pretty close to the code in `mnist-tool`, just
         // wrapped in an Observable to make it easy to display in SwiftUI
 
         // download & load the training data
-        let url = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
+        let url = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("mnist/data", isDirectory: true)
+        try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
         try await download(into: url)
         let data = try load(from: url)
 
@@ -142,6 +170,8 @@ actor LeNetContainer {
     }
 
     func evaluate(image: CGImage) -> Int? {
+        guard let model else { return nil }
+
         let pixelData = image.grayscaleImage(with: mnistImageSize)?.pixelData()
         if let pixelData {
             let x = pixelData.reshaped([1, 28, 28, 1]).asType(.float32) / 255.0
