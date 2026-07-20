@@ -1,13 +1,120 @@
-#  MNISTTrainer
+# MNISTTrainer
 
-This is an example of model training that works on both macOS and iOS.
-The example will download the MNIST training data, create a LeNet, and train
-it. It will show the epoch time and test accuracy as it trains.
+`MNISTTrainer` is a SwiftUI example that trains a LeNet-style convolutional
+neural network with [MLX](https://github.com/ml-explore/mlx-swift) and then uses
+the trained model to recognize a handwritten digit. It runs on macOS and iOS.
 
-You will need to set the Team on the MNISTTrainer target in order to build and
-run on iOS.
+The application demonstrates the complete workflow:
 
-Some notes about the setup:
+1. Download and cache the MNIST dataset.
+2. Create and train a LeNet model on the GPU.
+3. Report test accuracy and epoch duration in the UI.
+4. Render a handwritten digit from a SwiftUI canvas.
+5. Convert the drawing to a normalized `28 x 28` `MLXArray` and classify it.
 
-- This will download test data over the network so MNISTTrainer -> Signing & Capabilities has the "Outgoing Connections (Client)" set in the App Sandbox
-- The website it connects to uses http rather than https so it has a "App Transport Security Settings" in the Info.plist
+## Project structure
+
+- `MNISTTrainerApp.swift` — application entry point.
+- `ContentView.swift` — training UI, observable training state, and
+  `LeNetContainer`, which owns the model and training loop.
+- `PredictionView.swift` — drawing canvas, image conversion, and inference UI.
+- `../../Libraries/MLXMNIST/MNIST.swift` — LeNet architecture, loss, accuracy,
+  and shuffled batch iteration.
+- `../../Libraries/MLXMNIST/Files.swift` — MNIST downloads, gzip decompression,
+  caching, and conversion to `MLXArray` values.
+
+## Model and training configuration
+
+The model is a LeNet-style network with the following layers:
+
+```text
+Input [batch, 28, 28, 1]
+  -> Conv2d(1, 6, kernel: 5, padding: 2) -> Tanh -> MaxPool2d(2)
+  -> Conv2d(6, 16, kernel: 5) -> Tanh -> MaxPool2d(2)
+  -> Flatten
+  -> Linear(400, 120) -> Tanh
+  -> Linear(120, 84) -> Tanh
+  -> Linear(84, 10)
+```
+
+Training uses:
+
+- 10 epochs
+- Batch size of 256
+- SGD with a learning rate of `0.1`
+- Cross-entropy loss
+- A deterministic random seed (`0`) for reproducible batch ordering
+- Test-set accuracy reported after every epoch
+
+MNIST files are stored in the app's Application Support directory under:
+
+```text
+<Application Support directory>/mnist/data
+```
+
+Already downloaded files are reused on subsequent runs and are not subject to
+the system's cache eviction policy. If the app has data from an older version
+under `Caches/mnist/data`, it moves that data to the new location on the next
+training run.
+
+## End-to-end flow
+
+```mermaid
+flowchart TD
+    A[Launch application] --> B{Training started?}
+    B -- No --> C[Show TrainingView]
+    C --> D[Tap Train]
+    D --> E{Running on iOS Simulator?}
+    E -- Yes --> F[Show MLX simulator limitation]
+    E -- No --> G[Select GPU device]
+    G --> H[Download missing MNIST files]
+    H --> I[Decompress and load images and labels]
+    I --> J[Initialize LeNet]
+    J --> K[Start 10-epoch training loop]
+    K --> L[Shuffle and create batches of 256]
+    L --> M[Forward pass and cross-entropy loss]
+    M --> N[Compute gradients]
+    N --> O[Update weights with SGD]
+    O --> P{More batches?}
+    P -- Yes --> L
+    P -- No --> Q[Evaluate test accuracy]
+    Q --> R{More epochs?}
+    R -- Yes --> K
+    R -- No --> S[Show Draw a digit]
+    S --> T[User draws on the canvas]
+    T --> U[Render Path as CGImage]
+    U --> V[Convert to grayscale 28 x 28 image]
+    V --> W[Normalize pixels to 0...1]
+    W --> X[Run LeNet inference]
+    X --> Y[argMax selects the predicted digit]
+    Y --> Z[Display prediction]
+```
+
+## Building and running
+
+Open the workspace or project in Xcode and select the `MNISTTrainer` target.
+On iOS, set a development Team for the target before building and running.
+
+The app needs network access on its first training run because it downloads the
+MNIST files. In the macOS App Sandbox, enable:
+
+```text
+Signing & Capabilities > App Sandbox > Outgoing Connections (Client)
+```
+
+The dataset is downloaded from one of several configured HTTPS mirrors in
+`Libraries/MLXMNIST/Files.swift`. The target also contains the required App
+Transport Security configuration for the data sources.
+
+## Platform note
+
+MLX evaluation is not supported by this example on the iOS Simulator. Running
+the training flow there stops early with an explanatory message. Use a real
+iPhone or iPad, or run the macOS target instead.
+
+## Limitations
+
+- The trained weights are kept in memory only; they are not saved to disk.
+- Closing the app means the model must be trained again before prediction.
+- The prediction screen currently provides `Predict` and `Clear` actions but
+  does not provide a button to return to the training screen.

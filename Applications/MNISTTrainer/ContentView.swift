@@ -114,9 +114,20 @@ actor LeNetContainer {
         // wrapped in an Observable to make it easy to display in SwiftUI
 
         // download & load the training data
-        let url = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
+        let fileManager = FileManager.default
+        let url = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("mnist/data", isDirectory: true)
-        try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+        let legacyURL = fileManager.urls(for: .cachesDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("mnist/data", isDirectory: true)
+
+        // Preserve data downloaded by older versions that stored it in Caches.
+        if !fileManager.fileExists(atPath: url.path), fileManager.fileExists(atPath: legacyURL.path) {
+            try fileManager.createDirectory(
+                at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try fileManager.moveItem(at: legacyURL, to: url)
+        }
+
+        try fileManager.createDirectory(at: url, withIntermediateDirectories: true)
         try await download(into: url)
         let data = try load(from: url)
 
