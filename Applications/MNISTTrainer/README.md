@@ -11,6 +11,7 @@ The application demonstrates the complete workflow:
 3. Report test accuracy and epoch duration in the UI.
 4. Render a handwritten digit from a SwiftUI canvas.
 5. Convert the drawing to a normalized `28 x 28` `MLXArray` and classify it.
+6. Save the trained model weights as a SafeTensors file for later inference.
 
 ## Project structure
 
@@ -57,6 +58,18 @@ the system's cache eviction policy. If the app has data from an older version
 under `Caches/mnist/data`, it moves that data to the new location on the next
 training run.
 
+After training, the model weights are saved as:
+
+```text
+<Application Support directory>/MNISTTrainer/Models/lenet.safetensors
+```
+
+When the app starts a training flow, it loads this file when it exists and
+skips retraining. The file contains the `LeNet` parameters only; optimizer
+state and an intermediate training epoch are not saved, so this is intended
+for restoring the model for inference rather than resuming an interrupted
+training run.
+
 ## End-to-end flow
 
 ```mermaid
@@ -64,30 +77,34 @@ flowchart TD
     A[Launch application] --> B{Training started?}
     B -- No --> C[Show TrainingView]
     C --> D[Tap Train]
-    D --> E{Running on iOS Simulator?}
-    E -- Yes --> F[Show MLX simulator limitation]
-    E -- No --> G[Select GPU device]
-    G --> H[Download missing MNIST files]
-    H --> I[Decompress and load images and labels]
-    I --> J[Initialize LeNet]
-    J --> K[Start 10-epoch training loop]
-    K --> L[Shuffle and create batches of 256]
-    L --> M[Forward pass and cross-entropy loss]
-    M --> N[Compute gradients]
-    N --> O[Update weights with SGD]
-    O --> P{More batches?}
-    P -- Yes --> L
-    P -- No --> Q[Evaluate test accuracy]
-    Q --> R{More epochs?}
-    R -- Yes --> K
-    R -- No --> S[Show Draw a digit]
-    S --> T[User draws on the canvas]
-    T --> U[Render Path as CGImage]
-    U --> V[Convert to grayscale 28 x 28 image]
-    V --> W[Normalize pixels to 0...1]
-    W --> X[Run LeNet inference]
-    X --> Y[argMax selects the predicted digit]
-    Y --> Z[Display prediction]
+    D --> E{Saved model available?}
+    E -- Yes --> F[Load lenet.safetensors]
+    F --> S[Show Draw a digit]
+    E -- No --> G{Running on iOS Simulator?}
+    G -- Yes --> H[Show MLX simulator limitation]
+    G -- No --> I[Select GPU device]
+    I --> J[Download missing MNIST files]
+    J --> K[Decompress and load images and labels]
+    K --> L[Initialize LeNet]
+    L --> M[Start 10-epoch training loop]
+    M --> N[Shuffle and create batches of 256]
+    N --> O[Forward pass and cross-entropy loss]
+    O --> P[Compute gradients]
+    P --> Q[Update weights with SGD]
+    Q --> R{More batches?}
+    R -- Yes --> N
+    R -- No --> T[Evaluate test accuracy]
+    T --> U{More epochs?}
+    U -- Yes --> M
+    U -- No --> V[Save lenet.safetensors]
+    V --> S
+    S --> W[User draws on the canvas]
+    W --> X[Render Path as CGImage]
+    X --> Y[Convert to grayscale 28 x 28 image]
+    Y --> Z[Normalize pixels to 0...1]
+    Z --> AA[Run LeNet inference]
+    AA --> AB[argMax selects the predicted digit]
+    AB --> AC[Display prediction]
 ```
 
 ## Building and running
@@ -114,7 +131,7 @@ iPhone or iPad, or run the macOS target instead.
 
 ## Limitations
 
-- The trained weights are kept in memory only; they are not saved to disk.
-- Closing the app means the model must be trained again before prediction.
+- Only model weights are saved. Optimizer state and intermediate epochs are
+  not persisted, so interrupted training cannot currently be resumed.
 - The prediction screen currently provides `Predict` and `Clear` actions but
   does not provide a button to return to the training screen.

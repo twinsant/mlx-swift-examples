@@ -83,6 +83,12 @@ class ModelState {
         #endif
 
         let model = LeNetContainer()
+        if try await model.loadIfAvailable() {
+            messages.append("Loaded saved model weights.")
+            self.state = .trained(model)
+            return
+        }
+
         try await model.train(output: self)
         self.state = .trained(model)
     }
@@ -93,6 +99,31 @@ actor LeNetContainer {
     private var model: LeNet?
 
     let mnistImageSize: CGSize = CGSize(width: 28, height: 28)
+
+    private var modelURL: URL {
+        FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("MNISTTrainer/Models/lenet.safetensors")
+    }
+
+    func loadIfAvailable() throws -> Bool {
+        #if targetEnvironment(simulator)
+            let device = Device(.cpu)
+        #else
+            let device = Device(.gpu)
+        #endif
+
+        return try Device.withDefaultDevice(device) {
+            guard FileManager.default.fileExists(atPath: modelURL.path) else { return false }
+
+            let loadedWeights = try loadArrays(url: modelURL)
+            let model = LeNet()
+            try model.update(
+                parameters: ModuleParameters.unflattened(Array(loadedWeights)), verify: .none)
+            eval(model.parameters())
+            self.model = model
+            return true
+        }
+    }
 
     func train(output: ModelState) async throws {
         #if targetEnvironment(simulator)
@@ -177,6 +208,17 @@ actor LeNetContainer {
                     """
                 )
             }
+        }
+
+        let saveFileManager = FileManager.default
+        try saveFileManager.createDirectory(
+            at: modelURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+        let weights = Dictionary(uniqueKeysWithValues: model.parameters().flattened())
+        try save(arrays: weights, url: modelURL)
+        let savedModelName = modelURL.lastPathComponent
+
+        await MainActor.run {
+            output.messages.append("Saved model weights to \(savedModelName).")
         }
     }
 
